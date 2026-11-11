@@ -1,39 +1,85 @@
-
-name: Compilar APK
+name: Compilar CleanYourTV oficial - TCL QM6K
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    runs-on: ubuntu-latest
-
+    runs-on: ubuntu-24.04
     steps:
-      - name: Descargar proyecto
+      - name: Descargar codigo original de CleanYourTV
         uses: actions/checkout@v4
+        with:
+          repository: Gathin23/cleanyourtv
+          ref: main
+          path: upstream
 
-      - name: Configurar Java
+      - name: Instalar Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Configurar Android SDK
+      - name: Instalar Android SDK 34
         uses: android-actions/setup-android@v3
         with:
-          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
       - name: Configurar Gradle
         uses: gradle/actions/setup-gradle@v4
-        
-      - name: Compilar APK
+        with:
+          gradle-version: '8.9'
+
+      - name: Configurar ocho favoritos en el launcher original
+        shell: bash
         run: |
-          gradle assembleDebug --no-daemon --stacktrace --info --console=plain
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('upstream/launcher/app/src/main/res/values/config.xml')
+          xml = path.read_text(encoding='utf-8')
+          apps = [
+              'com.netflix.ninja',
+              'com.amazon.amazonvideo.livingroom',
+              'com.disney.disneyplus',
+              'com.wbd.stream',
+              'com.apple.atve.androidtv.appletv',
+              'com.mubi',
+              'com.lite.fczx',
+              'com.google.android.youtube.tvmusic',
+          ]
+          pattern = r'(<string-array\s+name="dock_apps"[^>]*>).*?(</string-array>)'
+          def set_apps(match):
+              return match.group(1) + '\n' + ''.join(
+                  f'        <item>{app}</item>\n' for app in apps
+              ) + '    ' + match.group(2)
+          xml, count = re.subn(pattern, set_apps, xml, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit('No se encontro dock_apps en el upstream')
+
+          # El archivo de temas de CleanYourTV documenta hasta ocho columnas.
+          pattern = r'(<integer\s+name="columns">)\s*\d+\s*(</integer>)'
+          xml, count = re.subn(pattern, r'\g<1>8\g<2>', xml, count=1)
+          if count != 1:
+              raise SystemExit('No se encontro columns en el upstream')
+          path.write_text(xml, encoding='utf-8')
+          print('Favoritos:', ', '.join(apps))
+          print('Columnas: 8; filas extras bajo el dock: 0 (configuracion original)')
+          PY
+
+      - name: Compilar APK de CleanYourTV
+        working-directory: upstream/launcher
+        run: gradle :app:assembleDebug --no-daemon --stacktrace --console=plain
 
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: qm6k-home-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: cleanyourtv-tcl-qm6k
+          path: upstream/launcher/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
